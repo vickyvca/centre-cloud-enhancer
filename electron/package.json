@@ -1,8 +1,11 @@
 {
   "name": "nexapos-desktop",
   "version": "1.0.0",
-  "description": "NexaPOS - Aplikasi Point of Sale",
+  "description": "NexaPOS - Aplikasi Point of Sale Offline",
   "main": "main.js",
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.4.3"
+  }
 }
