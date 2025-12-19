@@ -123,7 +123,9 @@ npm run electron:build:win
 ```
 
 **App blank putih:**
-- Pastikan build berhasil dengan `npm run build`
+- Sudah diperbaiki! Pastikan menggunakan code terbaru
+- Cek bahwa `vite.config.ts` punya `base: "./"` 
+- Cek bahwa `App.tsx` pakai `HashRouter` bukan `BrowserRouter`
 - Cek console Electron dengan `Ctrl+Shift+I`
 
 ---
