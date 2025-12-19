@@ -27,6 +27,7 @@ import {
   Loader2,
   ShoppingCart,
 } from "lucide-react";
+import { ReceiptDialog } from "@/components/pos/ReceiptDialog";
 
 interface Item {
   id: string;
@@ -49,6 +50,27 @@ interface CartItem {
   subtotal: number;
 }
 
+interface ReceiptData {
+  invoiceNo: string;
+  date: Date;
+  customerName?: string;
+  cashierName?: string;
+  items: Array<{
+    name: string;
+    qty: number;
+    price: number;
+    discount_pct: number;
+    subtotal: number;
+  }>;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  grandTotal: number;
+  paidAmount: number;
+  changeAmount: number;
+  paymentMethod: string;
+}
+
 export default function POS() {
   const [items, setItems] = useState<Item[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -59,7 +81,9 @@ export default function POS() {
   const [paidAmount, setPaidAmount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const { user } = useAuth();
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
+  const { user, profile } = useAuth();
   const { toast } = useToast();
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -235,6 +259,31 @@ export default function POS() {
         });
       }
 
+      // Prepare receipt data
+      const receipt: ReceiptData = {
+        invoiceNo,
+        date: new Date(),
+        customerName: customerName || undefined,
+        cashierName: profile?.full_name || profile?.username || undefined,
+        items: cart.map((c) => ({
+          name: c.item.name,
+          qty: c.qty,
+          price: c.price,
+          discount_pct: c.discount_pct,
+          subtotal: c.subtotal,
+        })),
+        subtotal,
+        discount: 0,
+        tax: 0,
+        grandTotal,
+        paidAmount,
+        changeAmount,
+        paymentMethod,
+      };
+
+      setReceiptData(receipt);
+      setShowReceipt(true);
+
       toast({
         title: "Transaksi Berhasil",
         description: `Invoice: ${invoiceNo} | Kembalian: ${formatRupiah(changeAmount)}`,
@@ -267,9 +316,9 @@ export default function POS() {
     <AppLayout title="POS / Kasir">
       <div className="grid lg:grid-cols-3 gap-4 h-[calc(100vh-120px)] animate-fade-in">
         {/* Product List */}
-        <div className="lg:col-span-2 flex flex-col">
-          <Card className="flex-1 flex flex-col shadow-card">
-            <CardHeader className="pb-3">
+        <div className="lg:col-span-2 flex flex-col min-h-0">
+          <Card className="flex-1 flex flex-col shadow-card overflow-hidden">
+            <CardHeader className="pb-3 flex-shrink-0">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -328,9 +377,9 @@ export default function POS() {
         </div>
 
         {/* Cart */}
-        <div className="flex flex-col">
-          <Card className="flex-1 flex flex-col shadow-card">
-            <CardHeader className="pb-3">
+        <div className="flex flex-col min-h-0">
+          <Card className="flex-1 flex flex-col shadow-card overflow-hidden">
+            <CardHeader className="pb-3 flex-shrink-0">
               <CardTitle className="flex items-center gap-2">
                 <ShoppingCart className="h-5 w-5" />
                 Keranjang
@@ -339,9 +388,9 @@ export default function POS() {
                 )}
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col overflow-hidden">
-              {/* Cart Items */}
-              <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+            <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
+              {/* Cart Items - Scrollable */}
+              <div className="flex-1 overflow-y-auto px-6 space-y-2 min-h-0">
                 {cart.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <ShoppingCart className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -393,10 +442,8 @@ export default function POS() {
                 )}
               </div>
 
-              <Separator className="my-2" />
-
-              {/* Customer & Payment */}
-              <div className="space-y-3">
+              {/* Payment Section - Sticky at bottom */}
+              <div className="flex-shrink-0 border-t bg-card px-6 py-4 space-y-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Nama Pelanggan (opsional)</Label>
                   <Input
@@ -476,6 +523,14 @@ export default function POS() {
           </Card>
         </div>
       </div>
+
+      {/* Receipt Dialog */}
+      <ReceiptDialog
+        open={showReceipt}
+        onOpenChange={setShowReceipt}
+        data={receiptData}
+        storeName="NexaPOS Store"
+      />
     </AppLayout>
   );
 }
