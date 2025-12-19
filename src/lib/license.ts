@@ -19,7 +19,7 @@ interface ElectronLicenseAPI {
 const isElectron = true;
 
 const getLicenseAPI = (): ElectronLicenseAPI | null => {
-  if (isElectron) {
+  if (typeof window !== 'undefined' && (window as any).electronAPI) {
     return {
       getHWID: (window as any).electronAPI.getHWID,
       checkLicense: (window as any).electronAPI.checkLicense,

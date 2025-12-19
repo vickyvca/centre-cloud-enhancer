@@ -10,6 +10,34 @@ let mainWindow;
 let db;
 let licenseManager;
 
+// Get the correct path for production/development
+function getDistPath() {
+  if (isDev) {
+    return path.join(__dirname, '../dist/index.html');
+  }
+  
+  // In production, try multiple paths
+  const possiblePaths = [
+    path.join(__dirname, '../dist/index.html'),
+    path.join(process.resourcesPath, 'dist/index.html'),
+    path.join(app.getAppPath(), '../dist/index.html'),
+    path.join(app.getAppPath(), 'dist/index.html'),
+  ];
+
+  for (const p of possiblePaths) {
+    try {
+      require('fs').accessSync(p);
+      console.log('Found index.html at:', p);
+      return p;
+    } catch (e) {
+      console.log('Not found:', p);
+    }
+  }
+
+  // Default fallback
+  return path.join(__dirname, '../dist/index.html');
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -28,24 +56,55 @@ function createWindow() {
   });
 
   // Initialize database
-  db = new LocalDatabase();
-  db.init();
+  try {
+    db = new LocalDatabase();
+    db.init();
+    console.log('Database initialized successfully');
+  } catch (error) {
+    console.error('Database initialization error:', error);
+  }
 
   // Initialize license manager
   licenseManager = new LicenseManager();
 
   // Load the app
   if (isDev) {
-    mainWindow.loadURL('http://localhost:8080');
+    // Try port 8080 first (vite config), then 5173 (vite default)
+    const devUrl = 'http://localhost:8080';
+    console.log('Loading development URL:', devUrl);
+    mainWindow.loadURL(devUrl).catch(() => {
+      console.log('Port 8080 failed, trying 5173...');
+      mainWindow.loadURL('http://localhost:5173');
+    });
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    const indexPath = getDistPath();
+    console.log('Loading production file:', indexPath);
+    mainWindow.loadFile(indexPath).catch(err => {
+      console.error('Failed to load:', err);
+      // Show error in window
+      mainWindow.loadURL(`data:text/html,<h1>Error loading app</h1><p>${err.message}</p><p>Path: ${indexPath}</p>`);
+    });
   }
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
+    console.log('Window ready to show');
     mainWindow.show();
     mainWindow.focus();
+  });
+
+  // Also show on did-finish-load as backup
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('Content finished loading');
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  });
+
+  // Handle load failures
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load:', errorCode, errorDescription);
   });
 
   mainWindow.on('closed', () => {
