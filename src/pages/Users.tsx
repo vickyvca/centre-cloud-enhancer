@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
+import { db, isElectron } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { formatDate } from "@/lib/formatters";
@@ -45,6 +45,7 @@ interface UserProfile {
   full_name: string | null;
   created_at: string;
   role: "admin" | "kasir";
+  email?: string;
 }
 
 export default function UsersPage() {
@@ -63,28 +64,33 @@ export default function UsersPage() {
 
   const fetchUsers = async () => {
     try {
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("*")
-        .order("created_at", { ascending: false });
+      if (isElectron) {
+        // Use Electron's user list API
+        const api = (window as any).electronAPI;
+        const { data, error } = await api.users.list();
+        if (error) throw new Error(error.message);
+        setUsers(data || []);
+      } else {
+        // Supabase mode
+        const { data: profiles, error: profilesError } = await db.select<any>("profiles", { 
+          orderBy: "created_at", 
+          orderAsc: false 
+        });
+        if (profilesError) throw profilesError;
 
-      if (profilesError) throw profilesError;
+        const { data: roles, error: rolesError } = await db.select<any>("user_roles");
+        if (rolesError) throw rolesError;
 
-      const { data: roles, error: rolesError } = await supabase
-        .from("user_roles")
-        .select("user_id, role");
+        const usersWithRoles = profiles?.map((profile: any) => {
+          const userRole = roles?.find((r: any) => r.user_id === profile.id);
+          return {
+            ...profile,
+            role: (userRole?.role || "kasir") as "admin" | "kasir",
+          };
+        }) || [];
 
-      if (rolesError) throw rolesError;
-
-      const usersWithRoles = profiles?.map((profile) => {
-        const userRole = roles?.find((r) => r.user_id === profile.id);
-        return {
-          ...profile,
-          role: (userRole?.role || "kasir") as "admin" | "kasir",
-        };
-      }) || [];
-
-      setUsers(usersWithRoles);
+        setUsers(usersWithRoles);
+      }
     } catch (error) {
       console.error("Error fetching users:", error);
     } finally {
@@ -97,12 +103,14 @@ export default function UsersPage() {
 
     setProcessing(true);
     try {
-      const { error } = await supabase
-        .from("user_roles")
-        .update({ role: newRole })
-        .eq("user_id", editingUser.id);
-
-      if (error) throw error;
+      if (isElectron) {
+        const api = (window as any).electronAPI;
+        const { error } = await api.users.updateRole(editingUser.id, newRole);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await db.update("user_roles", { role: newRole }, { user_id: editingUser.id });
+        if (error) throw error;
+      }
 
       toast({
         title: "Role berhasil diubah",

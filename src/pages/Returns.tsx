@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { db, isElectron } from "@/lib/database";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -30,7 +30,6 @@ import {
   Plus,
   Search,
   Loader2,
-  Trash2,
 } from "lucide-react";
 
 interface ReturnItem {
@@ -70,11 +69,10 @@ export default function Returns() {
 
   const fetchReturns = async () => {
     try {
-      const { data, error } = await supabase
-        .from("returns")
-        .select("*")
-        .order("created_at", { ascending: false });
-
+      const { data, error } = await db.select<ReturnItem>("returns", { 
+        orderBy: "created_at", 
+        orderAsc: false 
+      });
       if (error) throw error;
       setReturns(data || []);
     } catch (error) {
@@ -88,36 +86,64 @@ export default function Returns() {
     if (!invoiceNo.trim()) return;
 
     try {
-      const { data: sale, error } = await supabase
-        .from("sales")
-        .select(`
-          id, invoice_no,
-          sale_items (
-            id, qty, price,
-            items!inner(id, name)
-          )
-        `)
-        .eq("invoice_no", invoiceNo.trim())
-        .single();
+      if (isElectron) {
+        // For Electron, we need to query sales and sale_items separately
+        const { data: sale } = await db.selectOne<any>("sales", { invoice_no: invoiceNo.trim() });
+        
+        if (!sale) {
+          toast({ variant: "destructive", title: "Invoice tidak ditemukan" });
+          return;
+        }
 
-      if (error || !sale) {
-        toast({
-          variant: "destructive",
-          title: "Invoice tidak ditemukan",
-        });
-        return;
+        const { data: saleItemsData } = await db.select<any>("sale_items", { where: { sale_id: sale.id } });
+        
+        // Get item names
+        const itemsWithNames: SaleItem[] = [];
+        for (const si of saleItemsData || []) {
+          const { data: item } = await db.selectOne<any>("items", { id: si.item_id });
+          if (item) {
+            itemsWithNames.push({
+              id: item.id,
+              name: item.name,
+              qty: Number(si.qty),
+              price: Number(si.price),
+              returnQty: 0,
+            });
+          }
+        }
+
+        setSaleId(sale.id);
+        setSaleItems(itemsWithNames);
+      } else {
+        // Supabase with joins
+        const { data: sale, error } = await supabase
+          .from("sales")
+          .select(`
+            id, invoice_no,
+            sale_items (
+              id, qty, price,
+              items!inner(id, name)
+            )
+          `)
+          .eq("invoice_no", invoiceNo.trim())
+          .single();
+
+        if (error || !sale) {
+          toast({ variant: "destructive", title: "Invoice tidak ditemukan" });
+          return;
+        }
+
+        setSaleId(sale.id);
+        setSaleItems(
+          sale.sale_items.map((item: any) => ({
+            id: item.items.id,
+            name: item.items.name,
+            qty: Number(item.qty),
+            price: Number(item.price),
+            returnQty: 0,
+          }))
+        );
       }
-
-      setSaleId(sale.id);
-      setSaleItems(
-        sale.sale_items.map((item: any) => ({
-          id: item.items.id,
-          name: item.items.name,
-          qty: Number(item.qty),
-          price: Number(item.price),
-          returnQty: 0,
-        }))
-      );
     } catch (error) {
       console.error("Error searching invoice:", error);
     }
@@ -146,54 +172,35 @@ export default function Returns() {
     try {
       const returnNo = generateInvoiceNo("RTN");
 
-      const { data: returnData, error: returnError } = await supabase
-        .from("returns")
-        .insert({
-          return_no: returnNo,
-          sale_id: saleId,
-          total: totalReturn,
-          notes,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      const { data: returnData, error: returnError } = await db.insert<any>("returns", {
+        return_no: returnNo,
+        sale_id: saleId,
+        total: totalReturn,
+        notes,
+        created_by: user?.id,
+      });
 
       if (returnError) throw returnError;
 
-      // Create return items
-      const returnItems = itemsToReturn.map((item) => ({
-        return_id: returnData.id,
-        item_id: item.id,
-        qty: item.returnQty,
-        price: item.price,
-        subtotal: item.returnQty * item.price,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("return_items")
-        .insert(returnItems);
-
-      if (itemsError) throw itemsError;
-
-      // Update stock (add back)
+      // Create return items and update stock
       for (const item of itemsToReturn) {
-        const { data: currentItem } = await supabase
-          .from("items")
-          .select("stock")
-          .eq("id", item.id)
-          .single();
+        await db.insert("return_items", {
+          return_id: returnData!.id,
+          item_id: item.id,
+          qty: item.returnQty,
+          price: item.price,
+          subtotal: item.returnQty * item.price,
+        });
 
+        // Update stock (add back)
+        const { data: currentItem } = await db.selectOne<any>("items", { id: item.id });
         if (currentItem) {
-          await supabase
-            .from("items")
-            .update({ stock: Number(currentItem.stock) + item.returnQty })
-            .eq("id", item.id);
-
-          await supabase.from("stock_moves").insert({
+          await db.update("items", { stock: Number(currentItem.stock) + item.returnQty }, { id: item.id });
+          await db.insert("stock_moves", {
             item_id: item.id,
             qty: item.returnQty,
             type: "return",
-            reference_id: returnData.id,
+            reference_id: returnData!.id,
             notes: `Retur ${returnNo}`,
           });
         }

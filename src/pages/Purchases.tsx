@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { db, isElectron } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { formatRupiah, formatDate, generateInvoiceNo } from "@/lib/formatters";
@@ -38,7 +38,6 @@ import {
   Search,
   Loader2,
   CheckCircle,
-  FileText,
 } from "lucide-react";
 
 interface Purchase {
@@ -99,13 +98,19 @@ export default function Purchases() {
 
   const fetchPurchases = async () => {
     try {
-      const { data, error } = await supabase
-        .from("purchases")
-        .select("*, suppliers(name)")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setPurchases(data || []);
+      if (isElectron) {
+        const { data, error } = await db.select<Purchase>("purchases_with_supplier");
+        if (error) throw error;
+        setPurchases(data || []);
+      } else {
+        const { data, error } = await db.select<Purchase>("purchases", { 
+          select: "*, suppliers(name)", 
+          orderBy: "created_at",
+          orderAsc: false 
+        });
+        if (error) throw error;
+        setPurchases(data || []);
+      }
     } catch (error) {
       console.error("Error fetching purchases:", error);
     } finally {
@@ -114,16 +119,12 @@ export default function Purchases() {
   };
 
   const fetchSuppliers = async () => {
-    const { data } = await supabase.from("suppliers").select("id, name").order("name");
+    const { data } = await db.select<Supplier>("suppliers", { orderBy: "name" });
     setSuppliers(data || []);
   };
 
   const fetchItems = async () => {
-    const { data } = await supabase
-      .from("items")
-      .select("id, code, name, buy_price, stock")
-      .eq("is_active", true)
-      .order("name");
+    const { data } = await db.select<Item>("items", { where: { is_active: true }, orderBy: "name" });
     setItems(data || []);
   };
 
@@ -177,47 +178,39 @@ export default function Purchases() {
     try {
       const invoiceNo = generateInvoiceNo("PO");
 
-      const { data: purchase, error: purchaseError } = await supabase
-        .from("purchases")
-        .insert({
-          invoice_no: invoiceNo,
-          supplier_id: formData.supplier_id || null,
-          status,
-          total,
-          notes: formData.notes || null,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      const { data: purchase, error: purchaseError } = await db.insert<any>("purchases", {
+        invoice_no: invoiceNo,
+        supplier_id: formData.supplier_id || null,
+        status,
+        total,
+        notes: formData.notes || null,
+        created_by: user?.id,
+      });
 
       if (purchaseError) throw purchaseError;
 
-      const items = purchaseItems.map((p) => ({
-        purchase_id: purchase.id,
-        item_id: p.item_id,
-        qty: p.qty,
-        price: p.price,
-        subtotal: p.subtotal,
-      }));
-
-      const { error: itemsError } = await supabase.from("purchase_items").insert(items);
-      if (itemsError) throw itemsError;
+      // Insert purchase items
+      for (const p of purchaseItems) {
+        await db.insert("purchase_items", {
+          purchase_id: purchase!.id,
+          item_id: p.item_id,
+          qty: p.qty,
+          price: p.price,
+          subtotal: p.subtotal,
+        });
+      }
 
       // If posted, update stock
       if (status === "posted") {
         for (const p of purchaseItems) {
-          const item = await supabase.from("items").select("stock").eq("id", p.item_id).single();
-          if (item.data) {
-            await supabase
-              .from("items")
-              .update({ stock: Number(item.data.stock) + p.qty })
-              .eq("id", p.item_id);
-
-            await supabase.from("stock_moves").insert({
+          const { data: item } = await db.selectOne<Item>("items", { id: p.item_id });
+          if (item) {
+            await db.update("items", { stock: Number(item.stock) + p.qty }, { id: p.item_id });
+            await db.insert("stock_moves", {
               item_id: p.item_id,
               qty: p.qty,
               type: "purchase",
-              reference_id: purchase.id,
+              reference_id: purchase!.id,
               notes: `Pembelian ${invoiceNo}`,
             });
           }
@@ -245,21 +238,14 @@ export default function Purchases() {
 
     try {
       // Get purchase items
-      const { data: items } = await supabase
-        .from("purchase_items")
-        .select("item_id, qty")
-        .eq("purchase_id", purchase.id);
+      const { data: pItems } = await db.select<any>("purchase_items", { where: { purchase_id: purchase.id } });
 
       // Update stock
-      for (const p of items || []) {
-        const item = await supabase.from("items").select("stock").eq("id", p.item_id).single();
-        if (item.data) {
-          await supabase
-            .from("items")
-            .update({ stock: Number(item.data.stock) + p.qty })
-            .eq("id", p.item_id);
-
-          await supabase.from("stock_moves").insert({
+      for (const p of pItems || []) {
+        const { data: item } = await db.selectOne<Item>("items", { id: p.item_id });
+        if (item) {
+          await db.update("items", { stock: Number(item.stock) + Number(p.qty) }, { id: p.item_id });
+          await db.insert("stock_moves", {
             item_id: p.item_id,
             qty: p.qty,
             type: "purchase",
@@ -269,7 +255,7 @@ export default function Purchases() {
         }
       }
 
-      await supabase.from("purchases").update({ status: "posted" }).eq("id", purchase.id);
+      await db.update("purchases", { status: "posted" }, { id: purchase.id });
 
       toast({ title: "Pembelian berhasil diposting" });
       fetchPurchases();
@@ -500,14 +486,12 @@ export default function Purchases() {
                         </TableCell>
                         <TableCell>{formatDate(purchase.date)}</TableCell>
                         <TableCell>{purchase.suppliers?.name || "-"}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right font-medium">
                           {formatRupiah(Number(purchase.total))}
                         </TableCell>
                         <TableCell>
                           <Badge
-                            variant={
-                              purchase.status === "posted" ? "default" : "secondary"
-                            }
+                            variant={purchase.status === "posted" ? "default" : "secondary"}
                           >
                             {purchase.status === "posted" ? "Posted" : "Draft"}
                           </Badge>
