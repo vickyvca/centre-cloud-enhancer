@@ -15,7 +15,8 @@ interface ElectronLicenseAPI {
   activateLicense: (key: string) => Promise<LicenseStatus & { activated?: boolean }>;
 }
 
-const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
+// Force Electron mode - always true for client distribution
+const isElectron = true;
 
 const getLicenseAPI = (): ElectronLicenseAPI | null => {
   if (isElectron) {
