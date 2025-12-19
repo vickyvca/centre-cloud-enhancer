@@ -1,0 +1,8 @@
+{
+  "name": "nexapos-desktop",
+  "version": "1.0.0",
+  "description": "NexaPOS - Aplikasi Point of Sale",
+  "main": "main.js",
+  "author": "Your Name",
+  "license": "MIT"
+}
