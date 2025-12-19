@@ -1,10 +1,8 @@
-// Database abstraction layer - works with both Electron SQLite and Supabase
-// Detects environment and uses appropriate backend
+// Database abstraction layer - FORCE OFFLINE MODE for client distribution
+// Always uses Electron SQLite - no Supabase connection
 
-import { supabase } from "@/integrations/supabase/client";
-
-// Check if running in Electron
-const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
+// FORCE OFFLINE MODE - Always true for client distribution
+const isElectron = true;
 
 // Type for Electron API
 interface ElectronAPI {
@@ -21,13 +19,13 @@ interface ElectronAPI {
 }
 
 const getElectronAPI = (): ElectronAPI | null => {
-  if (isElectron) {
+  if (typeof window !== 'undefined' && (window as any).electronAPI) {
     return (window as any).electronAPI as ElectronAPI;
   }
   return null;
 };
 
-// Generic database operations
+// Generic database operations - OFFLINE ONLY
 export const db = {
   // Select all records from a table
   async select<T>(
@@ -41,30 +39,15 @@ export const db = {
   ): Promise<{ data: T[] | null; error: Error | null }> {
     const electronAPI = getElectronAPI();
     
-    if (electronAPI) {
-      // Electron/SQLite mode
-      const result = await electronAPI.db.select(table, options?.where, options?.orderBy);
-      if (result.error) {
-        return { data: null, error: new Error(result.error.message) };
-      }
-      return { data: result.data as T[], error: null };
-    } else {
-      // Supabase mode
-      let query = supabase.from(table as any).select(options?.select || '*');
-      
-      if (options?.where) {
-        Object.entries(options.where).forEach(([key, value]) => {
-          query = query.eq(key, value);
-        });
-      }
-      
-      if (options?.orderBy) {
-        query = query.order(options.orderBy, { ascending: options?.orderAsc ?? true });
-      }
-      
-      const { data, error } = await query;
-      return { data: data as T[], error };
+    if (!electronAPI) {
+      return { data: null, error: new Error('Aplikasi hanya berjalan di mode offline (Electron)') };
     }
+
+    const result = await electronAPI.db.select(table, options?.where, options?.orderBy);
+    if (result.error) {
+      return { data: null, error: new Error(result.error.message) };
+    }
+    return { data: result.data as T[], error: null };
   },
 
   // Select single record
@@ -74,22 +57,15 @@ export const db = {
   ): Promise<{ data: T | null; error: Error | null }> {
     const electronAPI = getElectronAPI();
     
-    if (electronAPI) {
-      const result = await electronAPI.db.selectOne(table, where);
-      if (result.error) {
-        return { data: null, error: new Error(result.error.message) };
-      }
-      return { data: result.data as T, error: null };
-    } else {
-      let query = supabase.from(table as any).select('*');
-      
-      Object.entries(where).forEach(([key, value]) => {
-        query = query.eq(key, value);
-      });
-      
-      const { data, error } = await query.single();
-      return { data: data as T, error };
+    if (!electronAPI) {
+      return { data: null, error: new Error('Aplikasi hanya berjalan di mode offline (Electron)') };
     }
+
+    const result = await electronAPI.db.selectOne(table, where);
+    if (result.error) {
+      return { data: null, error: new Error(result.error.message) };
+    }
+    return { data: result.data as T, error: null };
   },
 
   // Insert record
@@ -99,20 +75,15 @@ export const db = {
   ): Promise<{ data: T | null; error: Error | null }> {
     const electronAPI = getElectronAPI();
     
-    if (electronAPI) {
-      const result = await electronAPI.db.insert(table, data);
-      if (result.error) {
-        return { data: null, error: new Error(result.error.message) };
-      }
-      return { data: result.data as T, error: null };
-    } else {
-      const { data: result, error } = await supabase
-        .from(table as any)
-        .insert(data as any)
-        .select()
-        .single();
-      return { data: result as T, error };
+    if (!electronAPI) {
+      return { data: null, error: new Error('Aplikasi hanya berjalan di mode offline (Electron)') };
     }
+
+    const result = await electronAPI.db.insert(table, data);
+    if (result.error) {
+      return { data: null, error: new Error(result.error.message) };
+    }
+    return { data: result.data as T, error: null };
   },
 
   // Update record
@@ -123,22 +94,15 @@ export const db = {
   ): Promise<{ data: T | null; error: Error | null }> {
     const electronAPI = getElectronAPI();
     
-    if (electronAPI) {
-      const result = await electronAPI.db.update(table, data, where);
-      if (result.error) {
-        return { data: null, error: new Error(result.error.message) };
-      }
-      return { data: result.data as T, error: null };
-    } else {
-      let query = supabase.from(table as any).update(data as any);
-      
-      Object.entries(where).forEach(([key, value]) => {
-        query = query.eq(key, value);
-      });
-      
-      const { data: result, error } = await query.select().single();
-      return { data: result as T, error };
+    if (!electronAPI) {
+      return { data: null, error: new Error('Aplikasi hanya berjalan di mode offline (Electron)') };
     }
+
+    const result = await electronAPI.db.update(table, data, where);
+    if (result.error) {
+      return { data: null, error: new Error(result.error.message) };
+    }
+    return { data: result.data as T, error: null };
   },
 
   // Delete record
@@ -148,43 +112,35 @@ export const db = {
   ): Promise<{ error: Error | null }> {
     const electronAPI = getElectronAPI();
     
-    if (electronAPI) {
-      const result = await electronAPI.db.delete(table, where);
-      if (result.error) {
-        return { error: new Error(result.error.message) };
-      }
-      return { error: null };
-    } else {
-      let query = supabase.from(table as any).delete();
-      
-      Object.entries(where).forEach(([key, value]) => {
-        query = query.eq(key, value);
-      });
-      
-      const { error } = await query;
-      return { error };
+    if (!electronAPI) {
+      return { error: new Error('Aplikasi hanya berjalan di mode offline (Electron)') };
     }
+
+    const result = await electronAPI.db.delete(table, where);
+    if (result.error) {
+      return { error: new Error(result.error.message) };
+    }
+    return { error: null };
   },
 
-  // Custom query (Electron only - falls back to select for Supabase)
+  // Custom query (SQLite only)
   async query<T>(sql: string, params?: any[]): Promise<{ data: T[] | null; error: Error | null }> {
     const electronAPI = getElectronAPI();
     
-    if (electronAPI) {
-      const result = await electronAPI.db.query(sql, params);
-      if (result.error) {
-        return { data: null, error: new Error(result.error.message) };
-      }
-      return { data: result.data as T[], error: null };
-    } else {
-      // Custom SQL not supported in Supabase from frontend
-      return { data: null, error: new Error('Custom SQL queries are not supported in web mode') };
+    if (!electronAPI) {
+      return { data: null, error: new Error('Aplikasi hanya berjalan di mode offline (Electron)') };
     }
+
+    const result = await electronAPI.db.query(sql, params);
+    if (result.error) {
+      return { data: null, error: new Error(result.error.message) };
+    }
+    return { data: result.data as T[], error: null };
   },
 
-  // Check if running in offline mode
+  // Always offline mode
   isOffline(): boolean {
-    return isElectron;
+    return true;
   }
 };
 

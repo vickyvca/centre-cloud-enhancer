@@ -20,6 +20,7 @@ import Backup from "./pages/Backup";
 import Settings from "./pages/Settings";
 import Analytics from "./pages/Analytics";
 import Install from "./pages/Install";
+import License from "./pages/License";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="/settings" element={<Settings />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/install" element={<Install />} />
+              <Route path="/license" element={<License />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </HashRouter>
