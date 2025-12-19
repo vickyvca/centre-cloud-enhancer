@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider } from "next-themes";
+import { AIChatbot } from "@/components/ai/AIChatbot";
 
 import Dashboard from "./pages/Dashboard";
 import Auth from "./pages/Auth";
@@ -17,6 +18,8 @@ import Returns from "./pages/Returns";
 import Users from "./pages/Users";
 import Backup from "./pages/Backup";
 import Settings from "./pages/Settings";
+import Analytics from "./pages/Analytics";
+import Install from "./pages/Install";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -41,9 +44,12 @@ const App = () => (
               <Route path="/users" element={<Users />} />
               <Route path="/backup" element={<Backup />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/install" element={<Install />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
+          <AIChatbot />
         </TooltipProvider>
       </AuthProvider>
     </ThemeProvider>

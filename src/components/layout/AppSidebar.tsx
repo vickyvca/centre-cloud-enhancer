@@ -29,11 +29,13 @@ import {
   Settings,
   Store,
   RotateCcw,
+  BarChart3,
 } from "lucide-react";
 
 const mainMenuItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "POS / Kasir", url: "/pos", icon: ShoppingCart },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
 ];
 
 const masterMenuItems = [
