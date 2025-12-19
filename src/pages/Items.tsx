@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { db, isElectron } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { formatRupiah } from "@/lib/formatters";
@@ -90,13 +90,17 @@ export default function Items() {
 
   const fetchItems = async () => {
     try {
-      const { data, error } = await supabase
-        .from("items")
-        .select("*, categories(name)")
-        .order("name");
-
-      if (error) throw error;
-      setItems(data || []);
+      if (isElectron) {
+        // Use special join table for Electron
+        const { data, error } = await db.select<Item>("items_with_categories");
+        if (error) throw error;
+        setItems(data || []);
+      } else {
+        // Supabase with join
+        const { data, error } = await db.select<Item>("items", { select: "*, categories(name)", orderBy: "name" });
+        if (error) throw error;
+        setItems(data || []);
+      }
     } catch (error) {
       console.error("Error fetching items:", error);
     } finally {
@@ -105,7 +109,7 @@ export default function Items() {
   };
 
   const fetchCategories = async () => {
-    const { data } = await supabase.from("categories").select("id, name").order("name");
+    const { data } = await db.select<Category>("categories", { orderBy: "name" });
     setCategories(data || []);
   };
 
@@ -131,11 +135,11 @@ export default function Items() {
       };
 
       if (editingId) {
-        const { error } = await supabase.from("items").update(payload).eq("id", editingId);
+        const { error } = await db.update("items", payload, { id: editingId });
         if (error) throw error;
         toast({ title: "Barang berhasil diperbarui" });
       } else {
-        const { error } = await supabase.from("items").insert(payload);
+        const { error } = await db.insert("items", payload);
         if (error) throw error;
         toast({ title: "Barang berhasil ditambahkan" });
       }
@@ -190,7 +194,7 @@ export default function Items() {
   const handleDelete = async (id: string) => {
     if (!confirm("Hapus barang ini?")) return;
     try {
-      const { error } = await supabase.from("items").delete().eq("id", id);
+      const { error } = await db.delete("items", { id });
       if (error) throw error;
       toast({ title: "Barang berhasil dihapus" });
       fetchItems();

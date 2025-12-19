@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -56,11 +56,7 @@ export default function Suppliers() {
 
   const fetchSuppliers = async () => {
     try {
-      const { data, error } = await supabase
-        .from("suppliers")
-        .select("*")
-        .order("name");
-
+      const { data, error } = await db.select<Supplier>("suppliers", { orderBy: "name" });
       if (error) throw error;
       setSuppliers(data || []);
     } catch (error) {
@@ -83,16 +79,11 @@ export default function Suppliers() {
       };
 
       if (editingId) {
-        const { error } = await supabase
-          .from("suppliers")
-          .update(payload)
-          .eq("id", editingId);
-
+        const { error } = await db.update("suppliers", payload, { id: editingId });
         if (error) throw error;
         toast({ title: "Supplier berhasil diperbarui" });
       } else {
-        const { error } = await supabase.from("suppliers").insert(payload);
-
+        const { error } = await db.insert("suppliers", payload);
         if (error) throw error;
         toast({ title: "Supplier berhasil ditambahkan" });
       }
@@ -126,8 +117,7 @@ export default function Suppliers() {
     if (!confirm("Hapus supplier ini?")) return;
 
     try {
-      const { error } = await supabase.from("suppliers").delete().eq("id", id);
-
+      const { error } = await db.delete("suppliers", { id });
       if (error) throw error;
       toast({ title: "Supplier berhasil dihapus" });
       fetchSuppliers();

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { db, isElectron } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -49,11 +49,7 @@ export default function Categories() {
 
   const fetchCategories = async () => {
     try {
-      const { data, error } = await supabase
-        .from("categories")
-        .select("*")
-        .order("name");
-
+      const { data, error } = await db.select<Category>("categories", { orderBy: "name" });
       if (error) throw error;
       setCategories(data || []);
     } catch (error) {
@@ -70,18 +66,11 @@ export default function Categories() {
     setSaving(true);
     try {
       if (editingId) {
-        const { error } = await supabase
-          .from("categories")
-          .update({ name: name.trim() })
-          .eq("id", editingId);
-
+        const { error } = await db.update("categories", { name: name.trim() }, { id: editingId });
         if (error) throw error;
         toast({ title: "Kategori berhasil diperbarui" });
       } else {
-        const { error } = await supabase
-          .from("categories")
-          .insert({ name: name.trim() });
-
+        const { error } = await db.insert("categories", { name: name.trim() });
         if (error) throw error;
         toast({ title: "Kategori berhasil ditambahkan" });
       }
@@ -111,8 +100,7 @@ export default function Categories() {
     if (!confirm("Hapus kategori ini?")) return;
 
     try {
-      const { error } = await supabase.from("categories").delete().eq("id", id);
-
+      const { error } = await db.delete("categories", { id });
       if (error) throw error;
       toast({ title: "Kategori berhasil dihapus" });
       fetchCategories();
