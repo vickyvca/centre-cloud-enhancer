@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { formatRupiah, generateInvoiceNo } from "@/lib/formatters";
@@ -93,11 +93,10 @@ export default function POS() {
 
   const fetchItems = async () => {
     try {
-      const { data, error } = await supabase
-        .from("items")
-        .select("id, code, barcode, name, sell_price, sell_price_lv2, sell_price_lv3, discount_pct, stock, unit")
-        .eq("is_active", true)
-        .order("name");
+      const { data, error } = await db.select<Item>("items", {
+        where: { is_active: true },
+        orderBy: "name",
+      });
 
       if (error) throw error;
       setItems(data || []);
@@ -208,49 +207,45 @@ export default function POS() {
       const invoiceNo = generateInvoiceNo("INV");
 
       // Create sale
-      const { data: sale, error: saleError } = await supabase
-        .from("sales")
-        .insert({
-          invoice_no: invoiceNo,
-          customer_name: customerName || null,
-          price_level: Number(priceLevel),
-          subtotal,
-          discount: 0,
-          tax: 0,
-          grand_total: grandTotal,
-          payment_method: paymentMethod,
-          paid_amount: paidAmount,
-          change_amount: changeAmount,
-          cashier_id: user?.id,
-        })
-        .select()
-        .single();
+      const { data: sale, error: saleError } = await db.insert<any>("sales", {
+        invoice_no: invoiceNo,
+        customer_name: customerName || null,
+        price_level: Number(priceLevel),
+        subtotal,
+        discount: 0,
+        tax: 0,
+        grand_total: grandTotal,
+        payment_method: paymentMethod,
+        paid_amount: paidAmount,
+        change_amount: changeAmount,
+        cashier_id: user?.id,
+      });
 
       if (saleError) throw saleError;
 
       // Create sale items
-      const saleItems = cart.map((c) => ({
-        sale_id: sale.id,
-        item_id: c.item.id,
-        qty: c.qty,
-        price: c.price,
-        discount_pct: c.discount_pct,
-        subtotal: c.subtotal,
-      }));
-
-      const { error: itemsError } = await supabase.from("sale_items").insert(saleItems);
-      if (itemsError) throw itemsError;
-
-      // Update stock
       for (const c of cart) {
-        const { error: stockError } = await supabase
-          .from("items")
-          .update({ stock: Number(c.item.stock) - c.qty })
-          .eq("id", c.item.id);
+        const { error: itemError } = await db.insert<any>("sale_items", {
+          sale_id: sale.id,
+          item_id: c.item.id,
+          qty: c.qty,
+          price: c.price,
+          discount_pct: c.discount_pct,
+          subtotal: c.subtotal,
+        });
+        if (itemError) throw itemError;
+
+        // Update stock
+        const newStock = Number(c.item.stock) - c.qty;
+        const { error: stockError } = await db.update<any>(
+          "items",
+          { stock: newStock },
+          { id: c.item.id }
+        );
         if (stockError) throw stockError;
 
         // Record stock move
-        await supabase.from("stock_moves").insert({
+        await db.insert<any>("stock_moves", {
           item_id: c.item.id,
           qty: -c.qty,
           type: "sale",
@@ -498,9 +493,9 @@ export default function POS() {
                     <span className="text-primary">{formatRupiah(grandTotal)}</span>
                   </div>
                   {paidAmount > 0 && (
-                    <div className="flex justify-between text-success">
+                    <div className="flex justify-between text-success font-medium">
                       <span>Kembalian</span>
-                      <span className="font-semibold">{formatRupiah(changeAmount)}</span>
+                      <span>{formatRupiah(changeAmount)}</span>
                     </div>
                   )}
                 </div>
@@ -514,7 +509,7 @@ export default function POS() {
                   {processing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                    <CreditCard className="mr-2 h-4 w-4" />
+                    <ShoppingCart className="mr-2 h-4 w-4" />
                   )}
                   Bayar {formatRupiah(grandTotal)}
                 </Button>
@@ -524,12 +519,10 @@ export default function POS() {
         </div>
       </div>
 
-      {/* Receipt Dialog */}
       <ReceiptDialog
         open={showReceipt}
         onOpenChange={setShowReceipt}
         data={receiptData}
-        storeName="NexaPOS Store"
       />
     </AppLayout>
   );

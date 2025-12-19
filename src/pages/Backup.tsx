@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/database";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -16,6 +16,39 @@ import {
   CheckCircle,
   AlertCircle,
 } from "lucide-react";
+
+interface Category {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+interface Supplier {
+  id: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  created_at: string;
+}
+
+interface Item {
+  id: string;
+  code: string | null;
+  barcode: string | null;
+  name: string;
+  category_id: string | null;
+  unit: string | null;
+  buy_price: number | null;
+  sell_price: number | null;
+  sell_price_lv2: number | null;
+  sell_price_lv3: number | null;
+  discount_pct: number | null;
+  stock: number | null;
+  min_stock: number | null;
+  is_active: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export default function Backup() {
   const [exporting, setExporting] = useState(false);
@@ -31,7 +64,7 @@ export default function Backup() {
 
     setExporting(true);
     try {
-      // Fetch all data
+      // Fetch all data using db abstraction
       const [
         { data: categories },
         { data: suppliers },
@@ -43,15 +76,15 @@ export default function Backup() {
         { data: returns },
         { data: returnItems },
       ] = await Promise.all([
-        supabase.from("categories").select("*"),
-        supabase.from("suppliers").select("*"),
-        supabase.from("items").select("*"),
-        supabase.from("sales").select("*"),
-        supabase.from("sale_items").select("*"),
-        supabase.from("purchases").select("*"),
-        supabase.from("purchase_items").select("*"),
-        supabase.from("returns").select("*"),
-        supabase.from("return_items").select("*"),
+        db.select("categories"),
+        db.select("suppliers"),
+        db.select("items"),
+        db.select("sales"),
+        db.select("sale_items"),
+        db.select("purchases"),
+        db.select("purchase_items"),
+        db.select("returns"),
+        db.select("return_items"),
       ]);
 
       const backupData = {
@@ -116,56 +149,78 @@ export default function Backup() {
 
       // Import categories
       if (backupData.data.categories?.length > 0) {
-        const { error } = await supabase.from("categories").upsert(
-          backupData.data.categories.map((c: any) => ({
-            id: c.id,
-            name: c.name,
-            created_at: c.created_at,
-          })),
-          { onConflict: "id" }
-        );
-        if (error) throw error;
+        for (const c of backupData.data.categories) {
+          // Try to find existing, if not create
+          const { data: existing } = await db.selectOne<Category>("categories", { id: c.id });
+          if (!existing) {
+            await db.insert("categories", {
+              id: c.id,
+              name: c.name,
+              created_at: c.created_at,
+            });
+          }
+        }
       }
 
       // Import suppliers
       if (backupData.data.suppliers?.length > 0) {
-        const { error } = await supabase.from("suppliers").upsert(
-          backupData.data.suppliers.map((s: any) => ({
-            id: s.id,
-            name: s.name,
-            phone: s.phone,
-            address: s.address,
-            created_at: s.created_at,
-          })),
-          { onConflict: "id" }
-        );
-        if (error) throw error;
+        for (const s of backupData.data.suppliers) {
+          const { data: existing } = await db.selectOne<Supplier>("suppliers", { id: s.id });
+          if (!existing) {
+            await db.insert("suppliers", {
+              id: s.id,
+              name: s.name,
+              phone: s.phone,
+              address: s.address,
+              created_at: s.created_at,
+            });
+          }
+        }
       }
 
       // Import items
       if (backupData.data.items?.length > 0) {
-        const { error } = await supabase.from("items").upsert(
-          backupData.data.items.map((i: any) => ({
-            id: i.id,
-            code: i.code,
-            barcode: i.barcode,
-            name: i.name,
-            category_id: i.category_id,
-            unit: i.unit,
-            buy_price: i.buy_price,
-            sell_price: i.sell_price,
-            sell_price_lv2: i.sell_price_lv2,
-            sell_price_lv3: i.sell_price_lv3,
-            discount_pct: i.discount_pct,
-            stock: i.stock,
-            min_stock: i.min_stock,
-            is_active: i.is_active,
-            created_at: i.created_at,
-            updated_at: i.updated_at,
-          })),
-          { onConflict: "id" }
-        );
-        if (error) throw error;
+        for (const i of backupData.data.items) {
+          const { data: existing } = await db.selectOne<Item>("items", { id: i.id });
+          if (!existing) {
+            await db.insert("items", {
+              id: i.id,
+              code: i.code,
+              barcode: i.barcode,
+              name: i.name,
+              category_id: i.category_id,
+              unit: i.unit,
+              buy_price: i.buy_price,
+              sell_price: i.sell_price,
+              sell_price_lv2: i.sell_price_lv2,
+              sell_price_lv3: i.sell_price_lv3,
+              discount_pct: i.discount_pct,
+              stock: i.stock,
+              min_stock: i.min_stock,
+              is_active: i.is_active,
+              created_at: i.created_at,
+              updated_at: i.updated_at,
+            });
+          } else {
+            // Update existing item
+            await db.update("items", {
+              code: i.code,
+              barcode: i.barcode,
+              name: i.name,
+              category_id: i.category_id,
+              unit: i.unit,
+              buy_price: i.buy_price,
+              sell_price: i.sell_price,
+              sell_price_lv2: i.sell_price_lv2,
+              sell_price_lv3: i.sell_price_lv3,
+              discount_pct: i.discount_pct,
+              stock: i.stock,
+              min_stock: i.min_stock,
+              is_active: i.is_active,
+              updated_at: i.updated_at,
+            }, { id: i.id });
+          }
+        }
       }
 
       toast({

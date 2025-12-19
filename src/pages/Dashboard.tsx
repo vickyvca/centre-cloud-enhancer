@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/database";
 import { formatRupiah, formatNumber } from "@/lib/formatters";
 import {
   DollarSign,
@@ -40,6 +40,22 @@ interface ChartData {
   purchases: number;
 }
 
+interface Sale {
+  date: string;
+  grand_total: number | null;
+}
+
+interface Purchase {
+  date: string;
+  total: number | null;
+  status: string | null;
+}
+
+interface Item {
+  stock: number | null;
+  min_stock: number | null;
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     omzetToday: 0,
@@ -63,58 +79,44 @@ export default function Dashboard() {
         .toISOString()
         .split("T")[0];
 
-      // Fetch sales today
-      const { data: salesToday } = await supabase
-        .from("sales")
-        .select("grand_total")
-        .eq("date", today);
+      // Fetch all sales
+      const { data: allSales } = await db.select<Sale>("sales");
 
-      const omzetToday = salesToday?.reduce((sum, s) => sum + Number(s.grand_total), 0) || 0;
+      // Filter sales today
+      const salesToday = allSales?.filter(s => s.date === today) || [];
+      const omzetToday = salesToday.reduce((sum, s) => sum + Number(s.grand_total || 0), 0);
 
-      // Fetch sales this month
-      const { data: salesMonth } = await supabase
-        .from("sales")
-        .select("grand_total")
-        .gte("date", monthStart)
-        .lte("date", today);
+      // Filter sales this month
+      const salesMonth = allSales?.filter(s => s.date >= monthStart && s.date <= today) || [];
+      const omzetMonth = salesMonth.reduce((sum, s) => sum + Number(s.grand_total || 0), 0);
 
-      const omzetMonth = salesMonth?.reduce((sum, s) => sum + Number(s.grand_total), 0) || 0;
+      // Transaction count today
+      const trxCount = salesToday.length;
 
-      // Fetch transaction count today
-      const { count: trxCount } = await supabase
-        .from("sales")
-        .select("*", { count: "exact", head: true })
-        .eq("date", today);
+      // Fetch all purchases
+      const { data: allPurchases } = await db.select<Purchase>("purchases");
 
-      // Fetch purchases today
-      const { data: purchasesToday } = await supabase
-        .from("purchases")
-        .select("total")
-        .eq("date", today)
-        .eq("status", "posted");
+      // Filter purchases today (posted)
+      const purchasesToday = allPurchases?.filter(p => p.date === today && p.status === "posted") || [];
+      const buyToday = purchasesToday.reduce((sum, p) => sum + Number(p.total || 0), 0);
 
-      const buyToday = purchasesToday?.reduce((sum, p) => sum + Number(p.total), 0) || 0;
+      // Fetch items for low stock count
+      const { data: items } = await db.select<Item>("items");
+      const lowStockCount = items?.filter(i => Number(i.stock || 0) <= Number(i.min_stock || 0)).length || 0;
 
-      // Fetch low stock count
-      const { data: items } = await supabase
-        .from("items")
-        .select("stock, min_stock");
-
-      const lowStockCount = items?.filter(i => Number(i.stock) <= Number(i.min_stock)).length || 0;
-
-      // Gross profit calculation would need sale_items with buy_price - simplified for now
-      const grossToday = omzetToday * 0.25; // Placeholder: assume 25% margin
+      // Gross profit calculation (placeholder: assume 25% margin)
+      const grossToday = omzetToday * 0.25;
 
       setStats({
         omzetToday,
         omzetMonth,
-        trxCount: trxCount || 0,
+        trxCount,
         buyToday,
         grossToday,
         lowStockCount,
       });
 
-      // Fetch chart data (last 7 days)
+      // Prepare chart data (last 7 days)
       const dates: ChartData[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
@@ -127,30 +129,21 @@ export default function Dashboard() {
       const startDate = dates[0].date;
       const endDate = dates[dates.length - 1].date;
 
-      const { data: salesData } = await supabase
-        .from("sales")
-        .select("date, grand_total")
-        .gte("date", startDate)
-        .lte("date", endDate);
-
-      const { data: purchasesData } = await supabase
-        .from("purchases")
-        .select("date, total")
-        .gte("date", startDate)
-        .lte("date", endDate)
-        .eq("status", "posted");
-
-      salesData?.forEach((s) => {
+      // Filter sales for chart
+      const salesData = allSales?.filter(s => s.date >= startDate && s.date <= endDate) || [];
+      salesData.forEach((s) => {
         const idx = dates.findIndex((d) => d.date === s.date);
         if (idx !== -1) {
-          dates[idx].sales += Number(s.grand_total);
+          dates[idx].sales += Number(s.grand_total || 0);
         }
       });
 
-      purchasesData?.forEach((p) => {
+      // Filter purchases for chart
+      const purchasesData = allPurchases?.filter(p => p.date >= startDate && p.date <= endDate && p.status === "posted") || [];
+      purchasesData.forEach((p) => {
         const idx = dates.findIndex((d) => d.date === p.date);
         if (idx !== -1) {
-          dates[idx].purchases += Number(p.total);
+          dates[idx].purchases += Number(p.total || 0);
         }
       });
 

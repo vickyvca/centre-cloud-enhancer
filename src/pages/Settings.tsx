@@ -7,23 +7,31 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "@/integrations/supabase/client";
+import { db, isElectron } from "@/lib/database";
+import { license } from "@/lib/license";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { formatDate } from "@/lib/formatters";
 import {
-  Settings,
   User,
-  Store,
   Palette,
-  Bell,
   Key,
   Loader2,
   Save,
   Moon,
   Sun,
+  Monitor,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+
+interface LicenseInfo {
+  license_key: string;
+  license_type: string | null;
+  is_active: boolean | null;
+  expire_date: string | null;
+}
 
 export default function SettingsPage() {
   const { user, profile, refreshProfile } = useAuth();
@@ -34,13 +42,10 @@ export default function SettingsPage() {
     full_name: "",
     username: "",
   });
-  const [storeSettings, setStoreSettings] = useState({
-    store_name: "NexaPOS Store",
-    address: "",
-    phone: "",
-    tax_rate: 0,
-  });
-  const [licenseInfo, setLicenseInfo] = useState<any>(null);
+  const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
+  const [hwid, setHwid] = useState<string | null>(null);
+  const [licenseKey, setLicenseKey] = useState("");
+  const [activating, setActivating] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -50,18 +55,40 @@ export default function SettingsPage() {
       });
     }
     fetchLicense();
+    fetchHWID();
   }, [profile]);
 
   const fetchLicense = async () => {
     try {
-      const { data } = await supabase
-        .from("app_license")
-        .select("*")
-        .eq("is_active", true)
-        .single();
-      setLicenseInfo(data);
+      if (isElectron) {
+        // Check license from Electron
+        const status = await license.check();
+        if (status.valid) {
+          setLicenseInfo({
+            license_key: "****-****-****-****",
+            license_type: status.licenseType || "FULL",
+            is_active: !status.expired,
+            expire_date: status.expireDate || null,
+          });
+        }
+      } else {
+        // Fetch from database
+        const { data } = await db.select<LicenseInfo>("app_license", {
+          where: { is_active: true },
+        });
+        if (data && data.length > 0) {
+          setLicenseInfo(data[0]);
+        }
+      }
     } catch (error) {
       console.error("Error fetching license:", error);
+    }
+  };
+
+  const fetchHWID = async () => {
+    if (isElectron) {
+      const id = await license.getHWID();
+      setHwid(id);
     }
   };
 
@@ -70,13 +97,14 @@ export default function SettingsPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
+      const { error } = await db.update(
+        "profiles",
+        {
           full_name: profileData.full_name,
           username: profileData.username,
-        })
-        .eq("id", user.id);
+        },
+        { id: user.id }
+      );
 
       if (error) throw error;
 
@@ -90,6 +118,37 @@ export default function SettingsPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleActivateLicense = async () => {
+    if (!licenseKey.trim()) {
+      toast({ variant: "destructive", title: "Masukkan kunci lisensi" });
+      return;
+    }
+
+    setActivating(true);
+    try {
+      const result = await license.activate(licenseKey);
+      if (result.activated || result.valid) {
+        toast({ title: "Lisensi berhasil diaktifkan" });
+        setLicenseKey("");
+        fetchLicense();
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Aktivasi gagal",
+          description: result.error || "Kunci lisensi tidak valid",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message,
+      });
+    } finally {
+      setActivating(false);
     }
   };
 
@@ -220,6 +279,15 @@ export default function SettingsPage() {
                     <Moon className="h-4 w-4" />
                   </div>
                 </div>
+
+                {isElectron && (
+                  <div className="p-4 rounded-lg bg-muted/50">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Monitor className="h-4 w-4" />
+                      <span>Mode: Desktop (Offline)</span>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -235,37 +303,83 @@ export default function SettingsPage() {
                   Detail lisensi aplikasi NexaPOS
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6">
+                {/* HWID Section - Only show in Electron */}
+                {isElectron && hwid && (
+                  <div className="p-4 rounded-lg bg-muted/50 space-y-2">
+                    <Label className="text-xs text-muted-foreground">Hardware ID (HWID)</Label>
+                    <p className="font-mono text-sm break-all">{hwid}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Berikan HWID ini ke admin untuk mendapatkan kunci lisensi
+                    </p>
+                  </div>
+                )}
+
                 {licenseInfo ? (
-                  <>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="p-4 rounded-lg bg-muted/50">
-                        <Label className="text-xs text-muted-foreground">Tipe Lisensi</Label>
-                        <p className="font-semibold text-lg">{licenseInfo.license_type}</p>
-                      </div>
-                      <div className="p-4 rounded-lg bg-muted/50">
-                        <Label className="text-xs text-muted-foreground">Status</Label>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <Label className="text-xs text-muted-foreground">Tipe Lisensi</Label>
+                      <p className="font-semibold text-lg">{licenseInfo.license_type}</p>
+                    </div>
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <Label className="text-xs text-muted-foreground">Status</Label>
+                      <div className="flex items-center gap-2">
+                        {licenseInfo.is_active ? (
+                          <CheckCircle className="h-5 w-5 text-success" />
+                        ) : (
+                          <XCircle className="h-5 w-5 text-destructive" />
+                        )}
                         <p className={`font-semibold text-lg ${licenseInfo.is_active ? "text-success" : "text-destructive"}`}>
                           {licenseInfo.is_active ? "Aktif" : "Tidak Aktif"}
                         </p>
                       </div>
-                      <div className="p-4 rounded-lg bg-muted/50">
-                        <Label className="text-xs text-muted-foreground">Kunci Lisensi</Label>
-                        <p className="font-mono text-sm">{licenseInfo.license_key}</p>
-                      </div>
-                      <div className="p-4 rounded-lg bg-muted/50">
-                        <Label className="text-xs text-muted-foreground">Berlaku Hingga</Label>
-                        <p className="font-semibold text-lg">
-                          {licenseInfo.expire_date ? formatDate(licenseInfo.expire_date) : "Selamanya"}
-                        </p>
-                      </div>
                     </div>
-                  </>
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <Label className="text-xs text-muted-foreground">Kunci Lisensi</Label>
+                      <p className="font-mono text-sm">{licenseInfo.license_key}</p>
+                    </div>
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <Label className="text-xs text-muted-foreground">Berlaku Hingga</Label>
+                      <p className="font-semibold text-lg">
+                        {licenseInfo.expire_date ? formatDate(licenseInfo.expire_date) : "Selamanya"}
+                      </p>
+                    </div>
+                  </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
                     <Key className="h-12 w-12 mx-auto mb-2 opacity-30" />
                     <p>Belum ada lisensi aktif</p>
                   </div>
+                )}
+
+                {/* License Activation - Only show in Electron */}
+                {isElectron && (
+                  <>
+                    <Separator />
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium">Aktivasi Lisensi</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Masukkan kunci lisensi yang diberikan admin
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="XXXX-XXXX-XXXX-XXXX"
+                          value={licenseKey}
+                          onChange={(e) => setLicenseKey(e.target.value.toUpperCase())}
+                          className="font-mono"
+                        />
+                        <Button onClick={handleActivateLicense} disabled={activating}>
+                          {activating ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "Aktivasi"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </>
                 )}
               </CardContent>
             </Card>
